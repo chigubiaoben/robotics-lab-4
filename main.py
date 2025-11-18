@@ -83,6 +83,15 @@ def print_xy():
     ev3.screen.clear()
     ev3.screen.print("x = {:.0f} mm".format(x))
     ev3.screen.print("y = {:.0f} mm".format(y))
+    print("x = ", x)
+    print("y = ", y)
+
+def print_xy_entry():
+    ev3.screen.clear()
+    ev3.screen.print("entry_x = {:.0f} mm".format(x_entry))
+    ev3.screen.print("entry_y = {:.0f} mm".format(y_entry))
+    print("entry_x = ", x)
+    print("entry_y = ", y)
 
 # ---------- Helpers ----------
 #把线速度（mm/s）转换成轮子转速（度/秒）
@@ -108,9 +117,17 @@ def gyro_angle_rel(base):
 #让机器人在原地转向，直到朝向达到目标角度
 def turn_to_heading_with_base(target_deg, base, tol=2.0, kp=3.0, max_sp=200):
     while True:
-        e = target_deg - gyro_angle_rel(base)
-        if abs(e) < tol: break
+        current = gyro_angle_rel(base)
+        e = target_deg - current
+
+        print("target =", target_deg, "current =", current, "error =", e)
+
+        if abs(e) < tol: 
+            break
         turn = max(-max_sp, min(max_sp, kp * e))
+
+        print("turn command =", turn)
+
         LEFT.run( turn); RIGHT.run(-turn)
         wait(10)
     LEFT.stop(Stop.HOLD); RIGHT.stop(Stop.HOLD)
@@ -127,7 +144,13 @@ def drive_straight_heading_with_base(target_deg, base, speed_mm_s, stop_cond_fn,
         head_cmd = max(-headroom, min(headroom, head_cmd))
         vL = v_cmd - head_cmd; vR = v_cmd + head_cmd
         set_wheels(vL, vR, MAX_SPEED, MIN_SPEED)
-        if stop_cond_fn(): break
+
+        #更新坐标
+        odom_update()
+        print_xy()
+
+        if stop_cond_fn(): 
+            break
         wait(20)
     LEFT.stop(Stop.BRAKE); RIGHT.stop(Stop.BRAKE)
 
@@ -178,26 +201,40 @@ def drive_straight_heading(target_deg, speed_mm_s, stop_cond_fn, max_time_ms=300
 
 
 
+# def heading_to_goal():
+#     dx = goal_x - x
+#     dy = goal_y - y
+#     return degrees(atan2(dy, dx))
 def heading_to_goal():
     dx = goal_x - x
     dy = goal_y - y
-    return degrees(atan2(dy, dx))
+    world_angle = degrees(atan2(dy, dx))
+    return world_angle - base_heading   # 坐标轴对齐
+
 
 def odom_reset_wheels():
     global _last_deg_avg
     LEFT.reset_angle(0)
     RIGHT.reset_angle(0)
     _last_deg_avg = 0.0
-
+        
 
 def init_bug2_odometry():
     global base_heading, x, y, _last_deg_avg
     x = 500   # mm
     y = 0     # mm
-    base_heading = gyro_zero()  #只更新这一次！
+    #base_heading = gyro_zero()  #只更新这一次！
+    base_heading = GYRO.angle()
+
+    print(">>> base_heading set to:", base_heading)
+
+
     LEFT.reset_angle(0)
     RIGHT.reset_angle(0)
     _last_deg_avg = 0.0
+
+    # wait(300000)
+    # return
 
 
 # m-line判断
@@ -374,6 +411,8 @@ def follow_wall_until_leave_point(x_entry, y_entry, dist_entry_to_goal):
 
         # 执行一步 wall-following
         wall_follow_step()
+        print_xy()
+        print_xy_entry()
 
         # 检查是否到达目标区域
         if in_goal_region(x, y):
@@ -384,8 +423,8 @@ def follow_wall_until_leave_point(x_entry, y_entry, dist_entry_to_goal):
             return "leave"
         
         # （可选）检测绕了一圈，障碍阻挡目标
-        if dist_mm(x, y, x_entry, y_entry) < 80:
-            return "loop"
+        # if dist_mm(x, y, x_entry, y_entry) < 80:
+        #     return "loop"
 
 
 
@@ -403,12 +442,20 @@ def main():
         wait(10)
 
     init_bug2_odometry()
+    print_xy()
+
+    
 
     #while（没有到达终点）
     while not in_goal_region(x, y):
         #朝向m-line（如何才能转到朝向m-line的方向？）
         angle = heading_to_goal()
+
+        print(">>> turning to:", angle)
+
         turn_to_heading(angle)
+
+        #wait(3000000)
 
         odom_reset_wheels()
         #走m-line
@@ -417,6 +464,7 @@ def main():
         speed_mm_s=SPEED_MM_S,
         stop_cond_fn=lambda: front_BUMP.pressed(),
         max_time_ms=120000)
+        
         #后退
         bump_backoff_and_align()
 
@@ -424,6 +472,8 @@ def main():
         x_entry = x
         y_entry = y
         dist_entry_to_goal = dist_mm(x_entry, y_entry, goal_x, goal_y)
+
+        print_xy_entry()
 
         #进行wall following直到可以离开障碍物
         leave_reason =  follow_wall_until_leave_point(x_entry, y_entry, dist_entry_to_goal)
